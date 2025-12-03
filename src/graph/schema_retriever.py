@@ -52,87 +52,47 @@ class SchemaRetriever:
             - metrics: Relevant metrics
             - sample_queries: Similar sample queries
         """
-        logger.info(f"Retrieving schema for: {question[:50]}...")
+        logger.info(f"[STEP 1/4] 🔍 Processing: {question[:50]}...")
         
         # Step 1: Vector search for initial matches
         vector_results = self.vector_index.vector_search(question, top_k=top_k)
-        logger.info(f"Vector search returned {len(vector_results)} results")
         
-        # Log chi tiết vector search results
-        logger.info("=" * 60)
-        logger.info("VECTOR SEARCH RESULTS:")
-        logger.info("=" * 60)
-        for i, result in enumerate(vector_results, 1):
-            label = result.get("label", "Unknown")
+        # Log vector results summary
+        tables_found = [r for r in vector_results if r.get("label") == "Table"]
+        columns_found = [r for r in vector_results if r.get("label") == "Column"]
+        concepts_found = [r for r in vector_results if r.get("label") == "Concept"]
+        metrics_found = [r for r in vector_results if r.get("label") == "Metric"]
+        
+        logger.info(f"[STEP 1/4] ✅ Vector search: {len(vector_results)} matches (Tables: {len(tables_found)}, Columns: {len(columns_found)}, Concepts: {len(concepts_found)}, Metrics: {len(metrics_found)})")
+        
+        # Top 3 results
+        for i, result in enumerate(vector_results[:3], 1):
+            label = result.get("label", "?")
             score = result.get("score", 0)
             props = result.get("props", {})
-            
-            # Get display name based on label type
             if label == "Table":
                 name = props.get("table_name", "N/A")
-                extra = f"business_name: {props.get('business_name', 'N/A')}"
             elif label == "Column":
-                name = f"{props.get('table_name', 'N/A')}.{props.get('column_name', 'N/A')}"
-                extra = f"business_name: {props.get('business_name', 'N/A')}"
-            elif label == "Concept":
-                name = props.get("concept", "N/A")
-                extra = f"synonyms: {props.get('synonyms', [])}"
-            elif label == "Metric":
-                name = props.get("name", "N/A")
-                extra = f"base_table: {props.get('base_table', 'N/A')}"
+                name = f"{props.get('table_name', '')}.{props.get('column_name', '')}"
             else:
-                name = str(props.get("name", "N/A"))
-                extra = ""
-            
-            logger.info(f"  {i}. [{label}] {name} (score: {score:.4f})")
-            logger.info(f"     {extra}")
-        logger.info("=" * 60)
+                name = props.get("name", props.get("concept", "N/A"))
+            logger.info(f"[STEP 1/4]    #{i} [{label}] {name} (score: {score:.2f})")
         
         # Step 2: Extract table names and columns from results
         relevant_tables = self._extract_relevant_tables(vector_results)
         relevant_columns = self._extract_relevant_columns(vector_results)
-        logger.info(f"Extracted relevant tables: {relevant_tables}")
-        logger.info(f"Extracted relevant columns: {len(relevant_columns)} columns")
-        for tbl, col in sorted(relevant_columns):
-            logger.info(f"  - {tbl}.{col}")
+        logger.info(f"[STEP 2/4] 📊 Extracted: {len(relevant_tables)} tables, {len(relevant_columns)} columns")
         
         # Step 3: Expand with graph traversal
-        logger.info("Expanding context with graph traversal...")
+        logger.info(f"[STEP 3/4] 🕸️ Graph traversal...")
         expanded_context = self._expand_context(relevant_tables, expand_depth, relevant_columns)
         
-        # Log expanded context
-        logger.info("=" * 60)
-        logger.info("EXPANDED CONTEXT (Graph Traversal):")
-        logger.info("=" * 60)
-        
-        logger.info(f"Tables ({len(expanded_context['tables'])}):")
-        for t in expanded_context['tables']:
-            logger.info(f"  - {t.get('table_name')} ({t.get('business_name')})")
-        
-        logger.info(f"Columns ({len(expanded_context['columns'])}):")
-        for c in expanded_context['columns']:
-            source = c.get('source', '')
-            source_tag = f" [{source}]" if source else ""
-            logger.info(f"  - {c.get('table_name')}.{c.get('column_name')} [{c.get('data_type')}]{source_tag} - {c.get('business_name')}")
-        
-        logger.info(f"Joins ({len(expanded_context['joins'])}):")
-        for j in expanded_context['joins']:
-            on_clause = j.get('on_clause', [])
-            if isinstance(on_clause, list):
-                on_str = ' AND '.join(on_clause)
-            else:
-                on_str = str(on_clause)
-            logger.info(f"  - {j.get('from_table')} --[{j.get('join_type')}]--> {j.get('to_table')}")
-            logger.info(f"    ON: {on_str}")
-        
-        logger.info(f"Metrics ({len(expanded_context['metrics'])}):")
-        for m in expanded_context['metrics']:
-            logger.info(f"  - {m.get('name')}: {m.get('expression')} (base: {m.get('base_table')})")
-        
-        logger.info("=" * 60)
+        # Log summary
+        logger.info(f"[STEP 3/4] ✅ Context: {len(expanded_context['tables'])} tables, {len(expanded_context['columns'])} columns, {len(expanded_context['joins'])} joins, {len(expanded_context['metrics'])} metrics")
         
         # Step 4: Get sample queries for few-shot learning
         sample_queries = self._get_sample_queries(relevant_tables)
+        logger.info(f"[STEP 4/4] 📝 Ready to generate SQL")
         
         return {
             "question": question,
@@ -227,7 +187,7 @@ class SchemaRetriever:
           AND (
             r.primary_key = true 
             OR r.time_column = true 
-            OR r.foreign_key = true
+            OR (r.foreign_key IS NOT NULL AND r.foreign_key = true)
           )
         RETURN t.table_name AS table_name,
                c.column_name AS column_name,

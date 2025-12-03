@@ -234,18 +234,22 @@ class Neo4jVectorIndex:
     ) -> List[Dict[str, Any]]:
         """Search all label indexes and combine results."""
         all_results = []
-        
-        logger.info(f"Searching across all labels: {self.INDEXED_LABELS}")
+        results_by_label = {}
         
         for label in self.INDEXED_LABELS:
             try:
                 results = self._search_single_label(query_embedding, label, top_k)
-                logger.info(f"  - {label}: found {len(results)} results")
+                results_by_label[label] = len(results)
                 all_results.extend(results)
             except Exception as e:
                 logger.warning(f"Vector search failed for {label}: {e}")
+                results_by_label[label] = 0
         
         # Sort by score and take top_k
         all_results.sort(key=lambda x: x["score"], reverse=True)
-        logger.info(f"Total results before filtering: {len(all_results)}, returning top {top_k}")
+        
+        # Log summary
+        summary = ", ".join([f"{k}: {v}" for k, v in results_by_label.items()])
+        logger.info(f"[Vector] Searched {len(self.INDEXED_LABELS)} indexes ({summary})")
+        
         return all_results[:top_k]

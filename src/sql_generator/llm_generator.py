@@ -46,21 +46,15 @@ class LLMSQLGenerator:
         Returns:
             Generated SQL query
         """
-        logger.info(f"Generating SQL with {self.model}...")
+        logger.info(f"[LLM] 🤖 Generating SQL with {self.model}...")
         
-        # Log prompt sent to LLM
-        logger.info("=" * 60)
-        logger.info("PROMPT SENT TO LLM:")
-        logger.info("=" * 60)
-        for msg in messages:
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            logger.info(f"[{role.upper()}]:")
-            # Log content with indentation for readability
-            for line in content.split('\n'):
-                logger.info(f"  {line}")
-            logger.info("-" * 40)
-        logger.info("=" * 60)
+        # Log prompt summary (not full content)
+        system_msg = next((m for m in messages if m.get("role") == "system"), {})
+        user_msg = next((m for m in messages if m.get("role") == "user"), {})
+        
+        system_len = len(system_msg.get("content", ""))
+        user_len = len(user_msg.get("content", ""))
+        logger.info(f"[LLM] 📝 Prompt: system={system_len} chars, user={user_len} chars")
         
         response = self.client.chat.completions.create(
             model=self.model,
@@ -71,15 +65,13 @@ class LLMSQLGenerator:
         
         content = response.choices[0].message.content
         
-        # Log raw response
-        logger.info("LLM RAW RESPONSE:")
-        logger.info(content)
-        logger.info("=" * 60)
-        
         # Extract SQL from response (handle code blocks)
         sql = self._extract_sql(content)
         
-        logger.info("SQL generated successfully")
+        # Log result
+        sql_preview = sql[:100].replace('\n', ' ') + "..." if len(sql) > 100 else sql.replace('\n', ' ')
+        logger.info(f"[LLM] ✅ Generated: {sql_preview}")
+        
         return sql
     
     def _extract_sql(self, content: str) -> str:
