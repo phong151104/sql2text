@@ -8,16 +8,19 @@ joins:
     description: "Join đơn hàng với thông tin ngân hàng."
 
   - from: orders
+    to: order_film
+    type: left
+    on:
+      - "orders.id = order_film.id"
+    description: "Join đơn hàng với thông tin đơn hàng chi tiết film."
+
+  - from: order_film
     to: vendor
     type: left
     on:
-      - "orders.vendor_booking_no IS NOT NULL"
-    description: "Join đơn hàng với thông tin vendor/rạp (tạm thời, sẽ refine khi có khóa rõ hơn)."
-
-  # Additional joins can be added here:
-  # - from: orders
-  #   to: campaign
-  #   type: left
-  #   on:
-  #     - "orders.campaign_id = campaign.id"
-  #   description: "Join đơn hàng với thông tin campaign."
+      - "order_film.vendor_id = vendor.id"
+    description: "Join đơn hàng với thông tin vendor."
+    
+  # sau này thêm:
+  # - orders.campaign_id -> campaign.id
+  # - orders.sub_campaign_id -> sub_campaign.id

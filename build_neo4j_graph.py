@@ -351,15 +351,41 @@ class Neo4jGraphBuilder:
         """Clear all nodes for the given domain."""
         logger.info(f"Clearing existing data for domain: {domain}")
 
-        # Delete all relationships and nodes for tables in this domain
+        # Get all table names in this domain first
+        result = session.run("""
+            MATCH (t:Table {domain: $domain})
+            RETURN t.table_name AS table_name
+        """, domain=domain)
+        table_names = [record["table_name"] for record in result]
+        logger.info(f"Found {len(table_names)} tables to clear: {table_names}")
+
+        # Delete all columns belonging to tables in this domain
+        if table_names:
+            session.execute_write(
+                lambda tx: tx.run("""
+                    MATCH (c:Column)
+                    WHERE c.table_name IN $table_names
+                    DETACH DELETE c
+                """, table_names=table_names)
+            )
+
+        # Delete all tables in this domain
         session.execute_write(
             lambda tx: tx.run("""
                 MATCH (t:Table {domain: $domain})
-                OPTIONAL MATCH (t)-[:HAS_COLUMN]->(c:Column)
-                OPTIONAL MATCH (t)-[:HAS_METRIC]->(m:Metric)
-                DETACH DELETE t, c, m
+                DETACH DELETE t
             """, domain=domain)
         )
+
+        # Delete all metrics with base_table in this domain's tables
+        if table_names:
+            session.execute_write(
+                lambda tx: tx.run("""
+                    MATCH (m:Metric)
+                    WHERE m.base_table IN $table_names
+                    DETACH DELETE m
+                """, table_names=table_names)
+            )
 
         # Clean up orphaned Concept nodes (those with no relationships)
         session.execute_write(
@@ -416,7 +442,8 @@ class Neo4jGraphBuilder:
             tx.run("""
                 UNWIND $tables AS t
                 MERGE (table:Table {domain: t.domain, table_name: t.table_name})
-                SET table.catalog = t.catalog,
+                SET table.name = t.table_name,
+                    table.catalog = t.catalog,
                     table.schema = t.schema,
                     table.table_type = t.table_type,
                     table.business_name = t.business_name,
@@ -476,8 +503,9 @@ class Neo4jGraphBuilder:
         def create_columns(tx: ManagedTransaction, columns: list[dict[str, Any]]) -> None:
             tx.run("""
                 UNWIND $columns AS c
-                MERGE (col:Column {table_name: c.table_name, column_name: c.column_name})
-                SET col.data_type = c.data_type,
+                CREATE (col:Column {table_name: c.table_name, column_name: c.column_name})
+                SET col.name = c.column_name,
+                    col.data_type = c.data_type,
                     col.business_name = c.business_name,
                     col.description = c.description,
                     col.semantics = c.semantics,
