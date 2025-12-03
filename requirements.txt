@@ -1,0 +1,5 @@
+# Text-to-SQL Neo4j Knowledge Graph Builder
+# Dependencies for build_neo4j_graph.py
+
+pyyaml>=6.0
+neo4j>=5.0.0
