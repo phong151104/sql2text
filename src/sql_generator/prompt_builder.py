@@ -17,6 +17,25 @@ class PromptBuilder:
     """
     
     @classmethod
+    def _get_full_table_name(cls, table: Dict[str, Any]) -> str:
+        """
+        Get full table name with catalog.schema.table format.
+        
+        Args:
+            table: Table dict with catalog, schema, table_name
+            
+        Returns:
+            Full qualified table name
+        """
+        parts = []
+        if table.get("catalog"):
+            parts.append(table["catalog"])
+        if table.get("schema"):
+            parts.append(table["schema"])
+        parts.append(table.get("table_name", "unknown"))
+        return ".".join(parts)
+    
+    @classmethod
     def get_system_prompt(cls) -> str:
         """Get system prompt with current date."""
         current_date = datetime.now().strftime("%Y-%m-%d")
@@ -32,15 +51,17 @@ class PromptBuilder:
 
 ## Guidelines:
 1. Use only the tables and columns provided in the schema context
-2. Follow the join paths specified - do not invent new joins
-3. Use appropriate aggregation functions (SUM, COUNT, AVG, etc.)
-4. Include proper date filtering when time periods are mentioned
-5. Use table aliases for clarity
-6. Return only the SQL query without explanation unless asked
-7. When user mentions relative dates (e.g., "this month", "last year", "yesterday"), use the current date information above to calculate the correct date range
+2. **IMPORTANT: Always use the FULL TABLE NAME with catalog.schema.table_name format as provided**
+3. Follow the join paths specified - do not invent new joins
+4. Use appropriate aggregation functions (SUM, COUNT, AVG, etc.)
+5. Include proper date filtering when time periods are mentioned
+6. Use table aliases for clarity
+7. Return only the SQL query without explanation unless asked
+8. When user mentions relative dates (e.g., "this month", "last year", "yesterday"), use the current date information above to calculate the correct date range
 
 ## Important:
 - The database is a data lakehouse using Spark SQL / Trino SQL dialect
+- **Always use fully qualified table names (catalog.schema.table_name) in FROM and JOIN clauses**
 - Use DATE, TIMESTAMP functions appropriately
 - Handle NULL values properly
 - Respect the grain of each table"""
@@ -58,12 +79,19 @@ class PromptBuilder:
         """
         parts = ["## Available Schema\n"]
         
+        # Build a mapping of table_name -> full_table_name for later use
+        table_full_names: Dict[str, str] = {}
+        
         # Tables section
         tables = context.get("tables", [])
         if tables:
             parts.append("### Tables\n")
             for table in tables:
-                table_info = f"**{table['table_name']}** ({table.get('table_type', 'unknown')})"
+                full_name = cls._get_full_table_name(table)
+                table_name = table.get('table_name', 'unknown')
+                table_full_names[table_name] = full_name
+                
+                table_info = f"**{full_name}** ({table.get('table_type', 'unknown')})"
                 if table.get("business_name"):
                     table_info += f" - {table['business_name']}"
                 parts.append(table_info)
@@ -88,7 +116,9 @@ class PromptBuilder:
                 columns_by_table[table_name].append(col)
             
             for table_name, cols in columns_by_table.items():
-                parts.append(f"**{table_name}**:")
+                # Use full table name if available
+                full_name = table_full_names.get(table_name, table_name)
+                parts.append(f"**{full_name}**:")
                 for col in cols:
                     col_info = f"  - `{col['column_name']}` ({col.get('data_type', 'unknown')})"
                     
@@ -111,6 +141,13 @@ class PromptBuilder:
         if joins:
             parts.append("### Join Relationships\n")
             for join in joins:
+                from_table = join.get('from_table', '')
+                to_table = join.get('to_table', '')
+                
+                # Use full table names
+                from_full = table_full_names.get(from_table, from_table)
+                to_full = table_full_names.get(to_table, to_table)
+                
                 on_clause = join.get("on_clause", [])
                 if isinstance(on_clause, list):
                     on_str = " AND ".join(on_clause)
@@ -118,8 +155,8 @@ class PromptBuilder:
                     on_str = str(on_clause)
                 
                 parts.append(
-                    f"- {join['from_table']} {join.get('join_type', 'LEFT')} JOIN "
-                    f"{join['to_table']} ON {on_str}"
+                    f"- {from_full} {join.get('join_type', 'LEFT')} JOIN "
+                    f"{to_full} ON {on_str}"
                 )
             parts.append("")
         
@@ -132,6 +169,14 @@ class PromptBuilder:
                     f"- **{metric['name']}**: {metric.get('business_name', '')} "
                     f"= `{metric.get('expression', '')}`"
                 )
+            parts.append("")
+        
+        # Add explicit instruction about table names
+        if table_full_names:
+            parts.append("### Table Name Reference\n")
+            parts.append("**Use these exact table names in your SQL:**")
+            for short_name, full_name in table_full_names.items():
+                parts.append(f"- `{short_name}` → `{full_name}`")
             parts.append("")
         
         return "\n".join(parts)
